@@ -254,16 +254,27 @@ class StudentReportValidator:
             '合計_平均': (14, 8)
         }
         
+        # Check if at least one subject score is entered for each category
+        has_target_score = False
+        has_result_score = False
+        has_average_score = False
+        
         for label, (row, col) in score_cells.items():
             value = sheet.cell(row=row, column=col).value
             
+            # Track if any subject scores are entered
+            if value is not None and isinstance(value, (int, float)):
+                if '_目標' in label and '合計' not in label:
+                    has_target_score = True
+                elif '_結果' in label and '合計' not in label and '順位' not in label:
+                    has_result_score = True
+                elif '_平均' in label and '合計' not in label:
+                    has_average_score = True
+            
+            # Only show warning for missing scores if NO scores are entered in that category
             if value is None:
-                self.add_validation_result(
-                    f"テストスコア - {label}",
-                    "未入力",
-                    "警告",
-                    f"{label}が入力されていません"
-                )
+                # Skip individual warnings - we'll check categories at the end
+                continue
             elif isinstance(value, (int, float)):
                 if '合計' in label and '平均' not in label:
                     if value > 500:
@@ -289,6 +300,29 @@ class StudentReportValidator:
                             "エラー",
                             f"{label}が0-100の範囲外です: {value}"
                         )
+        
+        # Check if at least one score is entered in each category
+        if not has_target_score:
+            self.add_validation_result(
+                "テストスコア - 目標点",
+                "未入力",
+                "警告",
+                "目標点が1教科も入力されていません"
+            )
+        if not has_result_score:
+            self.add_validation_result(
+                "テストスコア - 結果",
+                "未入力",
+                "警告",
+                "テスト結果が1教科も入力されていません"
+            )
+        if not has_average_score:
+            self.add_validation_result(
+                "テストスコア - 平均点",
+                "未入力",
+                "警告",
+                "平均点が1教科も入力されていません"
+            )
                         
         # Check if results match the sum
         subjects_result = []
@@ -297,7 +331,7 @@ class StudentReportValidator:
             if value and isinstance(value, (int, float)):
                 subjects_result.append(value)
                 
-        if len(subjects_result) == 5:
+        if len(subjects_result) >= 1:  # Changed from == 5 to >= 1
             calculated_sum = sum(subjects_result)
             total_result = sheet.cell(row=12, column=8).value
             if total_result and abs(calculated_sum - total_result) > 0.01:
@@ -310,18 +344,29 @@ class StudentReportValidator:
                 
     def validate_text_sections(self, sheet):
         text_sections = {
-            '現在の学習課題': (17, 2, 100, 500),
-            '課題に対する進捗状況': (17, 10, 100, 500),
-            '今後の目標': (27, 2, 50, 300),
-            '目標に向けた指導計画': (27, 10, 100, 500),
-            '授業態度・意欲・遅刻等': (37, 2, 50, 400),
-            '宿題について': (37, 10, 50, 400),
-            '家庭学習アドバイス': (47, 2, 100, 500),
+            '現在の学習課題': (18, 2, 100, 500),
+            '課題に対する進捗状況': (18, 10, 100, 500),
+            '今後の目標': (28, 2, 50, 300),
+            '目標に向けた指導計画': (28, 10, 100, 500),
+            '授業態度・意欲・遅刻等': (38, 2, 50, 400),
+            '宿題について': (38, 10, 50, 400),
+            '家庭学習アドバイス': (48, 2, 100, 500),
             '夏期講習提案理由': (50, 2, 50, 300)
         }
         
-        for section_name, (row, col, min_length, max_length) in text_sections.items():
-            content = sheet.cell(row=row, column=col).value
+        for section_name, (start_row, col, min_length, max_length) in text_sections.items():
+            # Check all 4 rows in the content area
+            all_content = []
+            
+            # Check 4 rows starting from start_row
+            for row_offset in range(4):
+                row = start_row + row_offset
+                cell_value = sheet.cell(row=row, column=col).value
+                if cell_value:
+                    all_content.append(str(cell_value).strip())
+            
+            # Combine all content found
+            content = ' '.join(all_content) if all_content else None
             
             if not content:
                 self.add_validation_result(
@@ -331,7 +376,7 @@ class StudentReportValidator:
                     f"{section_name}が入力されていません"
                 )
             else:
-                content_str = str(content).strip()
+                content_str = content.strip()
                 content_length = len(content_str)
                 
                 if content_length < min_length:
@@ -365,19 +410,27 @@ class StudentReportValidator:
             'あらわす': ['表わす', '現わす'],
         }
         
-        text_cells = [(17, 2), (17, 10), (27, 2), (27, 10), (37, 2), (37, 10), (47, 2), (50, 2)]
+        text_cells = [(18, 2), (18, 10), (28, 2), (28, 10), (38, 2), (38, 10), (48, 2), (50, 2)]
         
-        for row, col in text_cells:
-            content = sheet.cell(row=row, column=col).value
-            if content:
-                content_str = str(content)
+        for start_row, col in text_cells:
+            # Check all 4 rows in each content area
+            all_content = []
+            for row_offset in range(4):
+                row = start_row + row_offset
+                cell_value = sheet.cell(row=row, column=col).value
+                if cell_value:
+                    all_content.append(str(cell_value).strip())
+            
+            # Combine all content found
+            if all_content:
+                content_str = ' '.join(all_content)
                 
                 # Check for common typos
                 for correct, typos in common_typos.items():
                     for typo in typos:
                         if typo in content_str:
                             self.add_validation_result(
-                                f"誤字脱字 - セル({row}, {col})",
+                                f"誤字脱字 - セル({start_row}, {col})",
                                 "誤字の可能性",
                                 "警告",
                                 f"'{typo}' → '{correct}' の可能性があります"
@@ -387,7 +440,7 @@ class StudentReportValidator:
                 repeated_chars = re.findall(r'(.)\1{3,}', content_str)
                 if repeated_chars:
                     self.add_validation_result(
-                        f"誤字脱字 - セル({row}, {col})",
+                        f"誤字脱字 - セル({start_row}, {col})",
                         "文字の繰り返し",
                         "警告",
                         f"同じ文字の過度な繰り返しがあります: {''.join(repeated_chars)}"
@@ -396,7 +449,7 @@ class StudentReportValidator:
                 # Check for missing punctuation
                 if len(content_str) > 100 and content_str.count('。') < 2:
                     self.add_validation_result(
-                        f"誤字脱字 - セル({row}, {col})",
+                        f"誤字脱字 - セル({start_row}, {col})",
                         "句読点不足",
                         "情報",
                         "長い文章に句読点が少ない可能性があります"
@@ -450,22 +503,30 @@ class StudentReportValidator:
         }
         
         row_col_map = {
-            '現在の学習課題': (17, 2),
-            '課題に対する進捗状況': (17, 10),
-            '今後の目標': (27, 2),
-            '目標に向けた指導計画': (27, 10),
-            '授業態度・意欲・遅刻等': (37, 2),
-            '宿題について': (37, 10),
-            '家庭学習アドバイス': (47, 2)
+            '現在の学習課題': (18, 2),
+            '課題に対する進捗状況': (18, 10),
+            '今後の目標': (28, 2),
+            '目標に向けた指導計画': (28, 10),
+            '授業態度・意欲・遅刻等': (38, 2),
+            '宿題について': (38, 10),
+            '家庭学習アドバイス': (48, 2)
         }
         
         for section_name, rules in section_rules.items():
             if section_name in row_col_map:
-                row, col = row_col_map[section_name]
-                content = sheet.cell(row=row, column=col).value
+                start_row, col = row_col_map[section_name]
                 
-                if content:
-                    content_str = str(content).strip()
+                # Check all 4 rows in the content area
+                all_content = []
+                for row_offset in range(4):
+                    row = start_row + row_offset
+                    cell_value = sheet.cell(row=row, column=col).value
+                    if cell_value:
+                        all_content.append(str(cell_value).strip())
+                
+                # Combine all content found
+                if all_content:
+                    content_str = ' '.join(all_content)
                     content_lower = content_str.lower()
                     
                     # キーワードチェック
